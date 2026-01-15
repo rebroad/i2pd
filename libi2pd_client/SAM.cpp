@@ -111,27 +111,37 @@ namespace client
 		}
 		else
 		{
+			LogPrint (eLogWarning, "SAM: Handshake received, bytes=", bytes_transferred);
 			m_Buffer[bytes_transferred] = 0;
 			char * eol = (char *)memchr (m_Buffer, '\n', bytes_transferred);
 			if (eol)
 				*eol = 0;
-			LogPrint (eLogDebug, "SAM: Handshake ", m_Buffer);
+			// Also handle \r\n line endings
+			if (eol && eol > m_Buffer && eol[-1] == '\r')
+				eol[-1] = 0;
+			LogPrint (eLogDebug, "SAM: Handshake received: [", m_Buffer, "]");
 			char * separator = strchr (m_Buffer, ' ');
+			char * param_start = nullptr;
 			if (separator)
 			{
 				separator = strchr (separator + 1, ' ');
 				if (separator)
-					*separator = 0;
+				{
+					param_start = separator + 1; // Save pointer to parameters before null-terminating
+					*separator = 0; // Null-terminate at second space: "HELLO VERSION"
+				}
 			}
 
+			// Check for HELLO VERSION (Bitcoin sends "HELLO VERSION MIN=3.1 MAX=3.1")
+			// After null-termination at second space, m_Buffer should be "HELLO VERSION"
 			if (!strcmp (m_Buffer, SAM_HANDSHAKE))
 			{
 				int minVer = 0, maxVer = 0;
 				// try to find MIN and MAX, 3.0 if not found
-				if (separator)
+				// param_start points to the parameters after "HELLO VERSION"
+				if (param_start)
 				{
-					separator++;
-					auto params = ExtractParams (separator);
+					auto params = ExtractParams (param_start);
 					auto it = params.find (SAM_PARAM_MAX);
 					if (it != params.end ())
 						maxVer = ExtractVersion (it->second);
@@ -158,13 +168,15 @@ namespace client
 #else
 				size_t l = snprintf (m_Buffer, SAM_SOCKET_BUFFER_SIZE, SAM_HANDSHAKE_REPLY, CreateVersion (m_Version).c_str ());
 #endif
+				LogPrint (eLogWarning, "SAM: Sending handshake reply, version=", CreateVersion (m_Version), ", length=", l);
 				boost::asio::async_write (m_Socket, boost::asio::buffer (m_Buffer, l), boost::asio::transfer_all (),
 					std::bind(&SAMSocket::HandleHandshakeReplySent, shared_from_this (),
 					std::placeholders::_1, std::placeholders::_2));
 			}
 			else
 			{
-				LogPrint (eLogError, "SAM: Handshake mismatch");
+				// Log the actual received message for debugging
+				LogPrint (eLogError, "SAM: Handshake mismatch. Received: [", m_Buffer, "] (expected: HELLO VERSION)");
 				Terminate ("SAM: handshake mismatch");
 			}
 		}
@@ -185,6 +197,7 @@ namespace client
 		}
 		else
 		{
+			LogPrint (eLogWarning, "SAM: Handshake reply sent successfully, bytes=", bytes_transferred, ", now waiting for next command");
 			m_Socket.async_read_some (boost::asio::buffer(m_Buffer, SAM_SOCKET_BUFFER_SIZE),
 				std::bind(&SAMSocket::HandleMessage, shared_from_this (),
 				std::placeholders::_1, std::placeholders::_2));
@@ -229,96 +242,100 @@ namespace client
 	{
 		if (ecode)
 		{
-			LogPrint (eLogError, "SAM: Read error: ", ecode.message ());
+			LogPrint (eLogError, "SAM: Read error: ", ecode.message (), " (bytes_transferred=", bytes_transferred, ")");
 			if (ecode != boost::asio::error::operation_aborted)
 				Terminate ("SAM: read error");
 		}
-		else if (m_SocketType == SAMSocketType::eSAMSocketTypeStream)
-			HandleReceived (ecode, bytes_transferred);
 		else
 		{
-			bytes_transferred += m_BufferOffset;
-			m_BufferOffset = 0;
-			m_Buffer[bytes_transferred] = 0;
-			char * eol = (char *)memchr (m_Buffer, '\n', bytes_transferred);
-			if (eol)
+			LogPrint (eLogWarning, "SAM: Received message, bytes=", bytes_transferred);
+			if (m_SocketType == SAMSocketType::eSAMSocketTypeStream)
+				HandleReceived (ecode, bytes_transferred);
+			else
 			{
-				if (eol > m_Buffer && eol[-1] == '\r') eol--;
-				*eol = 0;
-				char * separator = strchr (m_Buffer, ' ');
-				if (separator)
+				bytes_transferred += m_BufferOffset;
+				m_BufferOffset = 0;
+				m_Buffer[bytes_transferred] = 0;
+				char * eol = (char *)memchr (m_Buffer, '\n', bytes_transferred);
+				if (eol)
 				{
-					// one word command
-					if (std::string_view (m_Buffer, separator - m_Buffer) == SAM_PING)
-					{
-						ProcessPing ({ separator + 1, (size_t)(eol - separator - 1) });
-						return;
-					}
-
-					// two words command
-					size_t l = 0;
-					separator = strchr (separator + 1, ' ');
+					if (eol > m_Buffer && eol[-1] == '\r') eol--;
+					*eol = 0;
+					char * separator = strchr (m_Buffer, ' ');
 					if (separator)
-					{	
-						*separator = 0;
-						l = eol - separator - 1;
-					}	
-					else
-						separator = eol;
-
-					if (!strcmp (m_Buffer, SAM_SESSION_CREATE))
-						ProcessSessionCreate ({ separator + 1, l });
-					else if (!strcmp (m_Buffer, SAM_STREAM_CONNECT))
-						ProcessStreamConnect (separator + 1, bytes_transferred - (separator - m_Buffer) - 1, bytes_transferred - (eol - m_Buffer) - 1);
-					else if (!strcmp (m_Buffer, SAM_STREAM_ACCEPT))
-						ProcessStreamAccept ({ separator + 1, l });
-					else if (!strcmp (m_Buffer, SAM_STREAM_FORWARD))
-						ProcessStreamForward ({ separator + 1, l });
-					else if (!strcmp (m_Buffer, SAM_DEST_GENERATE))
-						ProcessDestGenerate ({ separator + 1, l });
-					else if (!strcmp (m_Buffer, SAM_NAMING_LOOKUP))
-						ProcessNamingLookup ({ separator + 1, l });
-					else if (!strcmp (m_Buffer, SAM_SESSION_ADD))
-						ProcessSessionAdd ({ separator + 1, l });
-					else if (!strcmp (m_Buffer, SAM_SESSION_REMOVE))
-						ProcessSessionRemove ({ separator + 1, l });
-					else if (!strcmp (m_Buffer, SAM_DATAGRAM_SEND) || !strcmp (m_Buffer, SAM_RAW_SEND))
 					{
-						size_t len = bytes_transferred - (separator - m_Buffer) - 1;
-						size_t processed = ProcessDatagramSend (separator + 1, len, eol + 1);
-						if (processed < len)
+						// one word command
+						if (std::string_view (m_Buffer, separator - m_Buffer) == SAM_PING)
 						{
-							m_BufferOffset = len - processed;
-							if (processed > 0)
-								memmove (m_Buffer, separator + 1 + processed, m_BufferOffset);
-							else
-							{
-								// restore string back
-								*separator = ' ';
-								*eol = '\n';
-							}
+							ProcessPing ({ separator + 1, (size_t)(eol - separator - 1) });
+							return;
 						}
-						// since it's SAM v1 reply is not expected
-						Receive ();
+
+						// two words command
+						size_t l = 0;
+						separator = strchr (separator + 1, ' ');
+						if (separator)
+						{	
+							*separator = 0;
+							l = eol - separator - 1;
+						}	
+						else
+							separator = eol;
+
+						if (!strcmp (m_Buffer, SAM_SESSION_CREATE))
+							ProcessSessionCreate ({ separator + 1, l });
+						else if (!strcmp (m_Buffer, SAM_STREAM_CONNECT))
+							ProcessStreamConnect (separator + 1, bytes_transferred - (separator - m_Buffer) - 1, bytes_transferred - (eol - m_Buffer) - 1);
+						else if (!strcmp (m_Buffer, SAM_STREAM_ACCEPT))
+							ProcessStreamAccept ({ separator + 1, l });
+						else if (!strcmp (m_Buffer, SAM_STREAM_FORWARD))
+							ProcessStreamForward ({ separator + 1, l });
+						else if (!strcmp (m_Buffer, SAM_DEST_GENERATE))
+							ProcessDestGenerate ({ separator + 1, l });
+						else if (!strcmp (m_Buffer, SAM_NAMING_LOOKUP))
+							ProcessNamingLookup ({ separator + 1, l });
+						else if (!strcmp (m_Buffer, SAM_SESSION_ADD))
+							ProcessSessionAdd ({ separator + 1, l });
+						else if (!strcmp (m_Buffer, SAM_SESSION_REMOVE))
+							ProcessSessionRemove ({ separator + 1, l });
+						else if (!strcmp (m_Buffer, SAM_DATAGRAM_SEND) || !strcmp (m_Buffer, SAM_RAW_SEND))
+						{
+							size_t len = bytes_transferred - (separator - m_Buffer) - 1;
+							size_t processed = ProcessDatagramSend (separator + 1, len, eol + 1);
+							if (processed < len)
+							{
+								m_BufferOffset = len - processed;
+								if (processed > 0)
+									memmove (m_Buffer, separator + 1 + processed, m_BufferOffset);
+								else
+								{
+									// restore string back
+									*separator = ' ';
+									*eol = '\n';
+								}
+							}
+							// since it's SAM v1 reply is not expected
+							Receive ();
+						}
+						else
+						{
+							LogPrint (eLogError, "SAM: Unexpected message ", m_Buffer);
+							Terminate ("SAM: unexpected message");
+						}
 					}
 					else
 					{
-						LogPrint (eLogError, "SAM: Unexpected message ", m_Buffer);
-						Terminate ("SAM: unexpected message");
+						LogPrint (eLogError, "SAM: Malformed message ", m_Buffer);
+						Terminate ("malformed message");
 					}
 				}
 				else
 				{
-					LogPrint (eLogError, "SAM: Malformed message ", m_Buffer);
-					Terminate ("malformed message");
+					LogPrint (eLogWarning, "SAM: Incomplete message ", bytes_transferred);
+					m_BufferOffset = bytes_transferred;
+					// try to receive remaining message
+					Receive ();
 				}
-			}
-			else
-			{
-				LogPrint (eLogWarning, "SAM: Incomplete message ", bytes_transferred);
-				m_BufferOffset = bytes_transferred;
-				// try to receive remaining message
-				Receive ();
 			}
 		}
 	}
@@ -399,7 +416,7 @@ namespace client
 
 		std::shared_ptr<boost::asio::ip::udp::endpoint> forward = nullptr;
 		if ((type == SAMSessionType::eSAMSessionTypeDatagram || type == SAMSessionType::eSAMSessionTypeRaw) &&
-			params.find(SAM_PARAM_HOST) != params.end() && params.find(SAM_PARAM_PORT) != params.end())
+			params.Contains(SAM_PARAM_HOST) && params.Contains(SAM_PARAM_PORT))
 		{
 			// udp forward selected
 			boost::system::error_code e;
@@ -459,7 +476,8 @@ namespace client
 				}		
 				if (type == SAMSessionType::eSAMSessionTypeDatagram)
 					dest->SetReceiver (std::bind (&SAMSocket::HandleI2PDatagramReceive, shared_from_this (),
-						std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5),
+						std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, 
+					    std::placeholders::_4, std::placeholders::_5, std::placeholders::_6),
 						port
 					);
 				else // raw
@@ -683,14 +701,13 @@ namespace client
 		LogPrint(eLogDebug, "SAM: Stream forward: ", buf);
 		
 		auto params = ExtractParams(buf);
-		const auto itId = params.find(SAM_PARAM_ID);
-		if (itId == params.end())
+		auto id = params[SAM_PARAM_ID];
+		if (id.empty ())
 		{
 			SendSessionI2PError("Missing ID");
 			return;
 		}
-		std::string_view id = itId->second;
-
+		
 		auto session = m_Owner.FindSession(id);
 		if (!session)
 		{
@@ -703,14 +720,13 @@ namespace client
 			return;
 		}
 
-		const auto itPort = params.find(SAM_PARAM_PORT);
-		if (itPort == params.end())
+		auto portStr = params[SAM_PARAM_PORT];
+		if (portStr.empty ())
 		{
 			SendSessionI2PError("PORT is missing");
 			return;
 		}
 
-		std::string_view portStr = itPort->second;
 		if (!std::all_of(portStr.begin(), portStr.end(), ::isdigit))
 		{
 			SendSessionI2PError("Port must be numeric");
@@ -726,12 +742,12 @@ namespace client
 		}
 
 		boost::asio::ip::tcp::endpoint ep;
-		const auto itHost = params.find(SAM_PARAM_HOST);
+		auto host = params[SAM_PARAM_HOST];
 
-		if (itHost != params.end())
+		if (!host.empty ())
 		{
 			boost::system::error_code ec;
-			auto addr = boost::asio::ip::make_address(itHost->second, ec);
+			auto addr = boost::asio::ip::make_address(host, ec);
 			if (ec)
 			{
 				SendSessionI2PError("Invalid IP Address in HOST");
@@ -755,8 +771,7 @@ namespace client
 		m_ID = id;
 		m_IsAccepting = true;
 
-		auto itSilent = params.find(SAM_PARAM_SILENT);
-		if (itSilent != params.end() && itSilent->second == SAM_VALUE_TRUE)
+		if (params[SAM_PARAM_SILENT] == SAM_VALUE_TRUE)
 			m_IsSilent = true;
 
 		session->GetLocalDestination()->AcceptStreams(
@@ -811,24 +826,13 @@ namespace client
 		// extract signature type
 		i2p::data::SigningKeyType signatureType = i2p::data::SIGNING_KEY_TYPE_DSA_SHA1;
 		i2p::data::CryptoKeyType cryptoType = i2p::data::CRYPTO_KEY_TYPE_ELGAMAL;
-		auto it = params.find (SAM_PARAM_SIGNATURE_TYPE);
-		if (it != params.end ())
+		auto signatureTypeStr = params[SAM_PARAM_SIGNATURE_TYPE];
+		if (!signatureTypeStr.empty ())
 		{
-			if (!m_Owner.ResolveSignatureType (it->second, signatureType))
-				LogPrint (eLogWarning, "SAM: ", SAM_PARAM_SIGNATURE_TYPE, " is invalid ", it->second);
+			if (!m_Owner.ResolveSignatureType (signatureTypeStr, signatureType))
+				LogPrint (eLogWarning, "SAM: ", SAM_PARAM_SIGNATURE_TYPE, " is invalid ", signatureTypeStr);
 		}
-		it = params.find (SAM_PARAM_CRYPTO_TYPE);
-		if (it != params.end ())
-		{
-			try
-			{
-				cryptoType = std::stoi(std::string (it->second));
-			}
-			catch (const std::exception& ex)
-			{
-				LogPrint (eLogWarning, "SAM: ", SAM_PARAM_CRYPTO_TYPE, "error: ", ex.what ());
-			}
-		}
+		params.Get (SAM_PARAM_CRYPTO_TYPE, cryptoType);
 		auto keys = i2p::data::PrivateKeys::CreateRandomKeys (signatureType, cryptoType, true);
 #ifdef _MSC_VER
 		size_t l = sprintf_s (m_Buffer, SAM_SOCKET_BUFFER_SIZE, SAM_DEST_REPLY,
@@ -913,17 +917,8 @@ namespace client
 				return;
 			}
 			uint16_t fromPort = 0;
-			auto it = params.find (SAM_PARAM_FROM_PORT);
-			if (it != params.end ())
-			{
-				auto p = it->second;
-				auto res = std::from_chars(p.data(), p.data() + p.size(), fromPort);
-				if (res.ec != std::errc())
-				{
-					SendSessionI2PError("Invalid from port");
-					return;
-				}
-			}
+			params.Get (SAM_PARAM_FROM_PORT, fromPort);
+			
 			auto subsession = std::make_shared<SAMSubSession>(masterSession, id, type, fromPort);
 			if (m_Owner.AddSession (subsession))
 			{
@@ -1026,9 +1021,9 @@ namespace client
 		SendMessageReply ({m_Buffer, l}, false);
 	}
 
-	const std::map<std::string_view, std::string_view> SAMSocket::ExtractParams (std::string_view buf)
+	i2p::util::Mapping SAMSocket::ExtractParams (std::string_view buf)
 	{
-		std::map<std::string_view, std::string_view> params;
+		i2p::util::Mapping params;
 		size_t pos = 0;
 		while (pos < buf.length ())
 		{	
@@ -1046,7 +1041,7 @@ namespace client
 			}
 			auto value = field.find ('=');
 			if (value != std::string_view::npos)
-				params.emplace (field.substr (0, value), field.substr (value + 1));	
+				params.Insert (field.substr (0, value), field.substr (value + 1));	
 		}
 		return params;
 	}
@@ -1290,7 +1285,8 @@ namespace client
 			LogPrint (eLogWarning, "SAM: I2P forward acceptor has been reset");
 	}
 
-	void SAMSocket::HandleI2PDatagramReceive (const i2p::data::IdentityEx& from, uint16_t fromPort, uint16_t toPort, const uint8_t * buf, size_t len)
+	void SAMSocket::HandleI2PDatagramReceive (const i2p::data::IdentityEx& from, uint16_t fromPort, uint16_t toPort,
+		const uint8_t * buf, size_t len, const i2p::util::Mapping * options)
 	{
 		LogPrint (eLogDebug, "SAM: Datagram received ", len);
 		auto base64 = from.ToBase64 ();
@@ -1521,53 +1517,35 @@ namespace client
 	}
 
 	std::shared_ptr<SAMSession> SAMBridge::CreateSession (std::string_view id, SAMSessionType type,
-		std::string_view destination, const std::map<std::string_view, std::string_view>& params)
+		std::string_view destination, const i2p::util::Mapping& params)
 	{
-#if __GNUC__ < 10 // TODO: remove when older versions discontinued
-		std::map<std::string, std::string> p;
-		for (auto it: params)
-			p.emplace (std::string (it.first), std::string (it.second));
-#else		
-		std::map<std::string, std::string> p(params.begin (), params.end ()); 
-#endif	
 		std::shared_ptr<ClientDestination> localDestination = nullptr;
 		if (destination != "")
 		{
 			i2p::data::PrivateKeys keys;
 			if (!keys.FromBase64 (destination)) return nullptr;
 			localDestination = m_IsSingleThread ?
-				i2p::client::context.CreateNewLocalDestination (GetIOService (), keys, true, &p) :
-				i2p::client::context.CreateNewLocalDestination (keys, true, &p);
+				i2p::client::context.CreateNewLocalDestination (GetIOService (), keys, true, &params) :
+				i2p::client::context.CreateNewLocalDestination (keys, true, &params);
 		}
 		else // transient
 		{
 			// extract signature type
 			i2p::data::SigningKeyType signatureType = i2p::data::SIGNING_KEY_TYPE_DSA_SHA1;
 			i2p::data::CryptoKeyType cryptoType = i2p::data::CRYPTO_KEY_TYPE_ELGAMAL;
-			if (!params.empty ())
+			if (!params.IsEmpty ())
 			{
-				auto it = params.find (SAM_PARAM_SIGNATURE_TYPE);
-				if (it != params.end ())
+				auto signatureTypeStr = params[SAM_PARAM_SIGNATURE_TYPE];
+				if (!signatureTypeStr.empty ())
 				{
-					if (!ResolveSignatureType (it->second, signatureType))
-						LogPrint (eLogWarning, "SAM: ", SAM_PARAM_SIGNATURE_TYPE, " is invalid ", it->second);
+					if (!ResolveSignatureType (signatureTypeStr, signatureType))
+						LogPrint (eLogWarning, "SAM: ", SAM_PARAM_SIGNATURE_TYPE, " is invalid ", signatureTypeStr);
 				}
-				it = params.find (SAM_PARAM_CRYPTO_TYPE);
-				if (it != params.end ())
-				{
-					try
-					{
-						cryptoType = std::stoi(std::string (it->second));
-					}
-					catch (const std::exception& ex)
-					{
-						LogPrint (eLogWarning, "SAM: ", SAM_PARAM_CRYPTO_TYPE, "error: ", ex.what ());
-					}
-				}
+				params.Get (SAM_PARAM_CRYPTO_TYPE, cryptoType);
 			}
 			localDestination = m_IsSingleThread ?
-				i2p::client::context.CreateNewLocalDestination (GetIOService (), true, signatureType, cryptoType, &p) :
-				i2p::client::context.CreateNewLocalDestination (true, signatureType, cryptoType, &p);
+				i2p::client::context.CreateNewLocalDestination (GetIOService (), true, signatureType, cryptoType, &params) :
+				i2p::client::context.CreateNewLocalDestination (true, signatureType, cryptoType, &params);
 		}
 		if (localDestination)
 		{
