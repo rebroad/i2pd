@@ -111,11 +111,15 @@ namespace client
 		}
 		else
 		{
+			LogPrint (eLogWarning, "SAM: Handshake received, bytes=", bytes_transferred);
 			m_Buffer[bytes_transferred] = 0;
 			char * eol = (char *)memchr (m_Buffer, '\n', bytes_transferred);
 			if (eol)
 				*eol = 0;
-			LogPrint (eLogDebug, "SAM: Handshake ", m_Buffer);
+			// Also handle \r\n line endings
+			if (eol && eol > m_Buffer && eol[-1] == '\r')
+				eol[-1] = 0;
+			LogPrint (eLogDebug, "SAM: Handshake received: [", m_Buffer, "]");
 			char * separator = strchr (m_Buffer, ' ');
 			if (separator)
 			{
@@ -158,13 +162,15 @@ namespace client
 #else
 				size_t l = snprintf (m_Buffer, SAM_SOCKET_BUFFER_SIZE, SAM_HANDSHAKE_REPLY, CreateVersion (m_Version).c_str ());
 #endif
+				LogPrint (eLogWarning, "SAM: Sending handshake reply, version=", CreateVersion (m_Version), ", length=", l);
 				boost::asio::async_write (m_Socket, boost::asio::buffer (m_Buffer, l), boost::asio::transfer_all (),
 					std::bind(&SAMSocket::HandleHandshakeReplySent, shared_from_this (),
 					std::placeholders::_1, std::placeholders::_2));
 			}
 			else
 			{
-				LogPrint (eLogError, "SAM: Handshake mismatch");
+				// Log the actual received message for debugging
+				LogPrint (eLogError, "SAM: Handshake mismatch. Received: [", m_Buffer, "] (expected: HELLO VERSION)");
 				Terminate ("SAM: handshake mismatch");
 			}
 		}
@@ -185,6 +191,7 @@ namespace client
 		}
 		else
 		{
+			LogPrint (eLogWarning, "SAM: Handshake reply sent successfully, bytes=", bytes_transferred, ", now waiting for next command");
 			m_Socket.async_read_some (boost::asio::buffer(m_Buffer, SAM_SOCKET_BUFFER_SIZE),
 				std::bind(&SAMSocket::HandleMessage, shared_from_this (),
 				std::placeholders::_1, std::placeholders::_2));
@@ -338,7 +345,7 @@ namespace client
 
 	void SAMSocket::ProcessSessionCreate (std::string_view buf)
 	{
-		LogPrint (eLogDebug, "SAM: Session create: ", buf);
+		LogPrint (eLogWarning, "SAM: Session create received, ID length=", buf.length());
 		auto params = ExtractParams (buf);
 		std::string_view style = params[SAM_PARAM_STYLE];
 		std::string_view id = params[SAM_PARAM_ID];
