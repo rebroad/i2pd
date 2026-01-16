@@ -518,23 +518,47 @@ namespace data
 
 	void Reseeder::LoadCertificates ()
 	{
-		std::string certDir = i2p::fs::GetCertsDir() + i2p::fs::dirSep + "reseed";
+		std::vector<std::string> certDirs;
+		// Check user location first
+		std::string userCertDir = i2p::fs::GetCertsDir() + i2p::fs::dirSep + "reseed";
+		certDirs.push_back(userCertDir);
+
+		// Also check system location if different
+		std::string systemCertDir = "/var/lib/i2pd/certificates/reseed";
+		if (userCertDir != systemCertDir) {
+			certDirs.push_back(systemCertDir);
+		}
 
 		std::vector<std::string> files;
 		int numCertificates = 0;
+		std::set<std::string> loadedCerts; // Track loaded certificates to avoid duplicates
 
-		if (!i2p::fs::ReadDir(certDir, files)) {
-			LogPrint(eLogWarning, "Reseed: Can't load reseed certificates from ", certDir);
-			return;
-		}
-
-		for (const std::string & file : files) {
-			if (file.compare(file.size() - 4, 4, ".crt") != 0) {
-				LogPrint(eLogWarning, "Reseed: Ignoring file ", file);
+		for (const std::string & certDir : certDirs) {
+			std::vector<std::string> dirFiles;
+			if (!i2p::fs::ReadDir(certDir, dirFiles)) {
+				LogPrint(eLogDebug, "Reseed: Can't load reseed certificates from ", certDir);
 				continue;
 			}
-			LoadCertificate (file);
-			numCertificates++;
+
+			for (const std::string & file : dirFiles) {
+				if (file.compare(file.size() - 4, 4, ".crt") != 0) {
+					LogPrint(eLogDebug, "Reseed: Ignoring file ", file);
+					continue;
+				}
+				// Extract just the filename to avoid duplicates
+				std::string filename = file;
+				size_t sepPos = file.find_last_of(i2p::fs::dirSep);
+				if (sepPos != std::string::npos) {
+					filename = file.substr(sepPos + 1);
+				}
+				if (loadedCerts.find(filename) != loadedCerts.end()) {
+					LogPrint(eLogDebug, "Reseed: Skipping duplicate certificate ", filename);
+					continue;
+				}
+				LoadCertificate (file);
+				loadedCerts.insert(filename);
+				numCertificates++;
+			}
 		}
 		LogPrint (eLogInfo, "Reseed: ", numCertificates, " certificates loaded");
 	}
