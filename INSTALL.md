@@ -52,8 +52,9 @@ make -j4
 
 ### Installing Reseed Certificates
 
-After building i2pd, you **must** copy the reseed certificates to your i2pd data directory:
+i2pd automatically checks **both** user and system certificate locations, so you can install certificates in either location (or both). Duplicate certificates are automatically detected and only loaded once.
 
+**User location** (recommended for per-user installations):
 ```bash
 # Create the certificates directory if it doesn't exist
 mkdir -p ~/.i2pd/certificates/reseed
@@ -62,12 +63,29 @@ mkdir -p ~/.i2pd/certificates/reseed
 cp contrib/certificates/reseed/*.crt ~/.i2pd/certificates/reseed/
 ```
 
+**System location** (for system-wide installations):
+```bash
+# For system-wide installation
+sudo mkdir -p /var/lib/i2pd/certificates/reseed
+sudo cp contrib/certificates/reseed/*.crt /var/lib/i2pd/certificates/reseed/
+```
+
 **Note**: If you have a `cp` alias configured (e.g., `alias cp='cp --reflink=auto'`), it will automatically use reflinks when supported by your filesystem, and fall back to regular copy when not supported. This is the recommended configuration.
 
 **Alternative method** (using `install` command):
 ```bash
+# For user location
 install -m 644 contrib/certificates/reseed/*.crt ~/.i2pd/certificates/reseed/
+
+# For system location
+sudo install -m 644 contrib/certificates/reseed/*.crt /var/lib/i2pd/certificates/reseed/
 ```
+
+**How it works**: i2pd checks both locations in this order:
+1. User location: `~/.i2pd/certificates/reseed/` (or the directory specified by `certsdir` in your config)
+2. System location: `/var/lib/i2pd/certificates/reseed/`
+
+Certificates found in either location are loaded, and duplicates (same filename) are automatically skipped to avoid loading the same certificate twice.
 
 ### Verifying Certificates
 
@@ -86,24 +104,24 @@ You should see multiple `.crt` files (typically 12-13 files), including:
 
 ### System-wide Installation
 
-If installing i2pd system-wide (e.g., to `/usr/local/bin`), you may need to copy certificates to the system-wide location:
+For system-wide installations, you can place certificates in the system location (`/var/lib/i2pd/certificates/reseed/`). i2pd will automatically find them there, even if `certsdir` is not explicitly set in the configuration.
 
-```bash
-# For system-wide installation
-sudo mkdir -p /var/lib/i2pd/certificates/reseed
-sudo /usr/bin/cp contrib/certificates/reseed/*.crt /var/lib/i2pd/certificates/reseed/
-```
-
-Then ensure your `i2pd.conf` points to the correct certificates directory:
+If you want to use a custom certificates directory, set it in `i2pd.conf`:
 ```
 certsdir = /var/lib/i2pd/certificates
 ```
+
+**Note**: With the dual-location support, certificates in the system location are automatically checked even if `certsdir` points to a user location. This provides flexibility for mixed installations where some certificates are system-wide and others are user-specific.
 
 ## Troubleshooting
 
 ### Issue: "Reseed: Certificate for X not loaded"
 
-This indicates missing reseed certificates. Follow the "Installing Reseed Certificates" section above.
+This indicates missing reseed certificates. Check that certificates exist in either:
+- User location: `~/.i2pd/certificates/reseed/` (or your configured `certsdir`)
+- System location: `/var/lib/i2pd/certificates/reseed/`
+
+Follow the "Installing Reseed Certificates" section above to install them in either location.
 
 ### Issue: "Tunnels: Can't create outbound tunnel, no peers available"
 
