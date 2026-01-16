@@ -52,34 +52,7 @@ The easiest way to install i2pd is by using precompiled packages and binaries.
 You can fetch most of them on [release](https://github.com/PurpleI2P/i2pd/releases/latest) page.  
 Please see [documentation](https://i2pd.readthedocs.io/en/latest/user-guide/install/) for more info.
 
-Building
---------
-See [documentation](https://i2pd.readthedocs.io/en/latest/) for how to build
-i2pd from source on your OS.  
-
-note: i2pd with Qt GUI can be found in [i2pd-qt](https://github.com/PurpleI2P/i2pd-qt) repository and for android in [i2pd-android](https://github.com/PurpleI2P/i2pd-android) repository.
-
-
-Build instructions:
-
-* [unix](https://i2pd.readthedocs.io/en/latest/devs/building/unix/)
-* [windows](https://i2pd.readthedocs.io/en/latest/devs/building/windows/)
-* [iOS](https://i2pd.readthedocs.io/en/latest/devs/building/ios/)
-* [android](https://i2pd.readthedocs.io/en/latest/devs/building/android/)
-
-
-**Supported systems:**
-
-* GNU/Linux (Debian, Ubuntu, etc) - [![Build on Ubuntu](https://github.com/PurpleI2P/i2pd/actions/workflows/build.yml/badge.svg)](https://github.com/PurpleI2P/i2pd/actions/workflows/build.yml)
-* CentOS, Fedora, Mageia - [![Build Status](https://copr.fedorainfracloud.org/coprs/supervillain/i2pd/package/i2pd-git/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/supervillain/i2pd/package/i2pd-git/)
-* Alpine, ArchLinux, openSUSE, Gentoo, etc.
-* Windows - [![Build on Windows](https://github.com/PurpleI2P/i2pd/actions/workflows/build-windows.yml/badge.svg)](https://github.com/PurpleI2P/i2pd/actions/workflows/build-windows.yml)
-* Mac OS - [![Build on OSX](https://github.com/PurpleI2P/i2pd/actions/workflows/build-osx.yml/badge.svg)](https://github.com/PurpleI2P/i2pd/actions/workflows/build-osx.yml)
-* Docker image - [![Build containers](https://github.com/PurpleI2P/i2pd/actions/workflows/docker.yml/badge.svg)](https://github.com/PurpleI2P/i2pd/actions/workflows/docker.yml)
-* Snap - [![i2pd](https://snapcraft.io/i2pd/badge.svg)](https://snapcraft.io/i2pd) [![i2pd](https://snapcraft.io/i2pd/trending.svg?name=0)](https://snapcraft.io/i2pd)
-* FreeBSD - [![Build on FreeBSD](https://github.com/PurpleI2P/i2pd/actions/workflows/build-freebsd.yml/badge.svg)](https://github.com/PurpleI2P/i2pd/actions/workflows/build-freebsd.yml)
-* Android
-* iOS
+For building from source, see [INSTALL.md](INSTALL.md) for detailed instructions.
 
 Using i2pd
 ----------
