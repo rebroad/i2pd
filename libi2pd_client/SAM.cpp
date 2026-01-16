@@ -449,9 +449,11 @@ namespace client
 		}
 
 		// create destination
+		LogPrint (eLogWarning, "SAM: Creating session, id=", id, ", type=", (int)type);
 		auto session = m_Owner.CreateSession (id, type, destination == SAM_VALUE_TRANSIENT ? "" : destination, params);
 		if (session)
 		{
+			LogPrint (eLogWarning, "SAM: Session created successfully");
 			m_SocketType = SAMSocketType::eSAMSocketTypeSession;
 			if (type == SAMSessionType::eSAMSessionTypeDatagram || type == SAMSessionType::eSAMSessionTypeRaw)
 			{
@@ -478,10 +480,18 @@ namespace client
 					);
 			}
 
-			if (session->GetLocalDestination ()->IsReady ())
+			bool isReady = session->GetLocalDestination ()->IsReady ();
+			LogPrint (eLogWarning, "SAM: Destination IsReady=", isReady ? "true" : "false");
+			// For STREAM sessions (used by Bitcoin), send reply immediately even if not ready
+			// Bitcoin doesn't require full I2P network connectivity to use the SAM session
+			if (isReady || type == SAMSessionType::eSAMSessionTypeStream)
+			{
+				LogPrint (eLogWarning, "SAM: Sending reply immediately (ready=", isReady ? "true" : "false", ", type=STREAM)");
 				SendSessionCreateReplyOk ();
+			}
 			else
 			{
+				LogPrint (eLogWarning, "SAM: Destination not ready, setting up timer to check later");
 				m_Timer.expires_from_now (boost::posix_time::seconds(SAM_SESSION_READINESS_CHECK_INTERVAL));
 				m_Timer.async_wait (std::bind (&SAMSocket::HandleSessionReadinessCheckTimer,
 					shared_from_this (), std::placeholders::_1));
@@ -517,6 +527,7 @@ namespace client
 
 	void SAMSocket::SendSessionCreateReplyOk ()
 	{
+		LogPrint (eLogWarning, "SAM: SendSessionCreateReplyOk called");
 		auto session = m_Owner.FindSession(m_ID);
 		if (session)
 		{
@@ -526,7 +537,12 @@ namespace client
 #else
 			size_t l2 = snprintf (m_Buffer, SAM_SOCKET_BUFFER_SIZE, SAM_SESSION_CREATE_REPLY_OK, priv.c_str ());
 #endif
+			LogPrint (eLogWarning, "SAM: Sending SESSION STATUS RESULT=OK, length=", l2);
 			SendMessageReply ({m_Buffer, l2}, false);
+		}
+		else
+		{
+			LogPrint (eLogError, "SAM: SendSessionCreateReplyOk: session not found for ID=", m_ID);
 		}
 	}
 
