@@ -11,7 +11,7 @@ LDFLAGS ?= ${LD_DEBUG}
 
 # detect proper flag for c++17 support by compilers
 CXXVER := $(shell $(CXX) -dumpversion)
-ifeq ($(shell expr match $(CXX) 'clang'),5)
+ifeq ($(shell expr match "$(CXX)" 'clang'),5)
 	NEEDED_CXXFLAGS += -std=c++17
 else ifeq ($(shell expr match ${CXXVER} "[8-9]"),1) # gcc 8 - 9
 	NEEDED_CXXFLAGS += -std=c++17
