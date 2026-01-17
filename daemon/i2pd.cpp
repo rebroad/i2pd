@@ -8,6 +8,7 @@
 
 #include <stdlib.h>
 #include "Daemon.h"
+#include "Log.h"
 
 #if defined(QT_GUI_LIB)
 namespace i2p
@@ -28,10 +29,21 @@ int main( int argc, char* argv[] )
 	if (Daemon.init(argc, argv))
 	{
 		if (Daemon.start())
+		{
 			Daemon.run ();
+			LogPrint(eLogInfo, "i2pd: Main loop exited, stopping daemon...");
+		}
 		else
+		{
+			LogPrint(eLogError, "i2pd: Failed to start daemon");
 			return EXIT_FAILURE;
+		}
 		Daemon.stop();
+		LogPrint(eLogInfo, "i2pd: Daemon stopped, exiting with code 0");
+	}
+	else
+	{
+		LogPrint(eLogError, "i2pd: Failed to initialize daemon");
 	}
 	return EXIT_SUCCESS;
 }

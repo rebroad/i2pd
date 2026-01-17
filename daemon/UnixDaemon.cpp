@@ -44,13 +44,20 @@ void handle_signal(int sig)
 			{
 				i2p::context.SetAcceptsTunnels (false);
 				Daemon.gracefulShutdownInterval = 10*60; // 10 minutes
-				LogPrint(eLogInfo, "Graceful shutdown after ", Daemon.gracefulShutdownInterval, " seconds");
+				LogPrint(eLogInfo, "Daemon: Received SIGINT, graceful shutdown after ", Daemon.gracefulShutdownInterval, " seconds");
 			}
 			else
+			{
+				LogPrint(eLogInfo, "Daemon: Received SIGINT, shutting down...");
 				Daemon.running = 0;
+			}
 		break;
 		case SIGABRT:
+			LogPrint(eLogInfo, "Daemon: Received SIGABRT, shutting down...");
+			Daemon.running = 0; // Exit loop
+		break;
 		case SIGTERM:
+			LogPrint(eLogInfo, "Daemon: Received SIGTERM, shutting down gracefully...");
 			Daemon.running = 0; // Exit loop
 		break;
 		case SIGPIPE:
@@ -230,11 +237,12 @@ namespace i2p
 					gracefulShutdownInterval--; // - 1 second
 					if (gracefulShutdownInterval <= 0 || i2p::tunnel::tunnels.CountTransitTunnels() <= 0)
 					{
-						LogPrint(eLogInfo, "Graceful shutdown");
+						LogPrint(eLogInfo, "Daemon: Graceful shutdown complete, exiting...");
 						return;
 					}
 				}
 			}
+			LogPrint(eLogInfo, "Daemon: Main loop exited, shutting down...");
 		}
 	}
 }
