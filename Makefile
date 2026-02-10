@@ -159,6 +159,71 @@ clean:
 strip: $(I2PD) $(SHLIB) $(SHLIB_CLIENT) $(SHLIB_LANG)
 	strip $^
 
+# Smart build that analyzes failure and runs the appropriate fix
+smart-build:
+	@echo "🚀 Starting smart build with automatic error recovery..."
+	@echo "📋 Step 1: Attempting normal build..."
+	@echo ""
+	@( $(MAKE) all ; echo $$? > /tmp/i2pd-build.exit ) 2>&1 | tee /tmp/i2pd-build.log; \
+	result=$$(cat /tmp/i2pd-build.exit); \
+	if [ $$result -eq 0 ]; then \
+		echo ""; \
+		echo "✅ SUCCESS: Build completed without errors!"; \
+	else \
+		echo ""; \
+		echo "⚠️  BUILD FAILED: Analyzing error output..."; \
+		apt_pkgs=""; \
+		if grep -q "fatal error:.*No such file or directory" /tmp/i2pd-build.log; then \
+			echo "🔍 Detected: missing header(s) / dependency"; \
+			echo "   Missing:"; \
+			grep "fatal error:.*No such file or directory" /tmp/i2pd-build.log | sed -n 's/.*fatal error: *\([^:]*\):.*/\1/p' | sort -u | while read h; do echo "     - $$h"; done; \
+			echo ""; \
+			grep -q "boost/program_options" /tmp/i2pd-build.log && apt_pkgs="$$apt_pkgs libboost-program-options-dev"; \
+			grep -q "boost/system" /tmp/i2pd-build.log && apt_pkgs="$$apt_pkgs libboost-system-dev"; \
+			grep -q "boost/filesystem" /tmp/i2pd-build.log && apt_pkgs="$$apt_pkgs libboost-filesystem-dev"; \
+			grep -q "boost/thread" /tmp/i2pd-build.log && apt_pkgs="$$apt_pkgs libboost-thread-dev"; \
+			grep -q "openssl/ssl.h" /tmp/i2pd-build.log && apt_pkgs="$$apt_pkgs libssl-dev"; \
+			grep -q "zlib.h" /tmp/i2pd-build.log && apt_pkgs="$$apt_pkgs zlib1g-dev"; \
+		elif grep -q "cannot find -l" /tmp/i2pd-build.log; then \
+			echo "🔍 Detected: missing library (linker cannot find -l...)"; \
+			link_libs=$$(grep "cannot find -l" /tmp/i2pd-build.log | sed -n 's/.*cannot find -l\([^: ]*\).*/\1/p' | sort -u); \
+			echo "   Missing libs:"; \
+			for lib in $$link_libs; do echo "     - $$lib"; done; \
+			for lib in $$link_libs; do \
+				case $$lib in \
+					boost_program_options) apt_pkgs="$$apt_pkgs libboost-program-options-dev" ;; \
+					boost_system) apt_pkgs="$$apt_pkgs libboost-system-dev" ;; \
+					boost_filesystem) apt_pkgs="$$apt_pkgs libboost-filesystem-dev" ;; \
+					boost_thread) apt_pkgs="$$apt_pkgs libboost-thread-dev" ;; \
+					ssl) apt_pkgs="$$apt_pkgs libssl-dev" ;; \
+					crypto) apt_pkgs="$$apt_pkgs libssl-dev" ;; \
+					z) apt_pkgs="$$apt_pkgs zlib1g-dev" ;; \
+					*) apt_pkgs="$$apt_pkgs lib$${lib}-dev" ;; \
+				esac; \
+			done; \
+		fi; \
+		if [ -n "$$apt_pkgs" ]; then \
+			echo ""; \
+			echo "🔧 Installing $$apt_pkgs (using SUDO_ASKPASS)..."; \
+			SUDO_ASKPASS="$$HOME/bin/simple-askpass" sudo -A apt-get install -y $$apt_pkgs || exit 1; \
+			echo ""; \
+			echo "📋 Retrying build..."; \
+			$(MAKE) smart-build; \
+			exit $$?; \
+		fi; \
+		if grep -q "fatal error:.*No such file or directory" /tmp/i2pd-build.log; then \
+			echo "❌ No known package mapping. Install the dev package(s) for the header(s) above."; \
+			echo ""; \
+			exit 1; \
+		fi; \
+		if grep -q "cannot find -l" /tmp/i2pd-build.log; then exit 1; fi; \
+		echo "🔍 No specific pattern matched. Please check /tmp/i2pd-build.log for details."; \
+		exit 1; \
+	fi
+
+# Alias for smart-build
+smart: smart-build
+
 LATEST_TAG=$(shell git describe --tags --abbrev=0 openssl)
 BRANCH=$(shell git rev-parse --abbrev-ref HEAD)
 dist:
@@ -184,3 +249,5 @@ doxygen:
 .PHONY: mk_obj_dir
 .PHONY: install
 .PHONY: strip
+.PHONY: smart-build
+.PHONY: smart
