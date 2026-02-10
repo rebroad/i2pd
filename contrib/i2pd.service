@@ -9,12 +9,14 @@ User=i2pd
 Group=i2pd
 RuntimeDirectory=i2pd
 RuntimeDirectoryMode=0700
+StateDirectory=i2pd
+StateDirectoryMode=0700
 LogsDirectory=i2pd
 LogsDirectoryMode=0700
-Type=forking
-ExecStart=/usr/bin/i2pd --conf=/etc/i2pd/i2pd.conf --tunconf=/etc/i2pd/tunnels.conf --tunnelsdir=/etc/i2pd/tunnels.conf.d --pidfile=/run/i2pd/i2pd.pid --logfile=/var/log/i2pd/i2pd.log --daemon --service
+Environment=HOME=/var/lib/i2pd
+Type=simple
+ExecStart=/usr/bin/i2pd --conf=/etc/i2pd/i2pd.conf --tunconf=/etc/i2pd/tunnels.conf --tunnelsdir=/etc/i2pd/tunnels.conf.d --datadir=/var/lib/i2pd --logfile=/var/log/i2pd/i2pd.log
 ExecReload=/bin/sh -c "kill -HUP $MAINPID"
-PIDFile=/run/i2pd/i2pd.pid
 ### Uncomment, if auto restart needed
 #Restart=on-failure
 

@@ -63,8 +63,34 @@ install: all
 	install -d ${PREFIX}/share/man ${PREFIX}/share/man/man1
 	@gzip -kf debian/i2pd.1 && install debian/i2pd.1.gz ${PREFIX}/share/man/man1
 	install -d ${PREFIX}/var ${PREFIX}/var/lib ${PREFIX}/var/lib/i2pd
-	@ln -sf ${PREFIX}/share/i2pd/certificates ${PREFIX}/var/lib/i2pd/certificates
+	install -d ${PREFIX}/var/log ${PREFIX}/var/log/i2pd
+	install -d ${PREFIX}/var/lib/i2pd/certificates
+	@cp -R contrib/certificates/. ${PREFIX}/var/lib/i2pd/certificates/
 	@ln -sf ${PREFIX}/etc/i2pd/tunnels.conf.d ${PREFIX}/var/lib/i2pd/tunnels.d
 	@ln -sf ${PREFIX}/etc/i2pd/i2pd.conf ${PREFIX}/var/lib/i2pd/i2pd.conf
 	@ln -sf ${PREFIX}/etc/i2pd/subscriptions.txt ${PREFIX}/var/lib/i2pd/subscriptions.txt
 	@ln -sf ${PREFIX}/etc/i2pd/tunnels.conf ${PREFIX}/var/lib/i2pd/tunnels.conf
+	@if ! getent group i2pd >/dev/null 2>&1; then \
+		echo "Creating i2pd group..."; \
+		groupadd --system i2pd; \
+	fi
+	@if ! id -u i2pd >/dev/null 2>&1; then \
+		echo "Creating i2pd user..."; \
+		useradd --system --home-dir ${PREFIX}/var/lib/i2pd --create-home --shell /usr/sbin/nologin -g i2pd i2pd; \
+	fi
+	@chown -R i2pd:i2pd ${PREFIX}/var/lib/i2pd ${PREFIX}/var/log/i2pd || true
+	@chmod -R a+rX ${PREFIX}/var/lib/i2pd/certificates || true
+	@if command -v systemctl >/dev/null 2>&1; then \
+		echo "Installing systemd unit..."; \
+		install -d /etc/systemd/system; \
+		sed \
+			-e "s|/usr/bin|${PREFIX}/bin|g" \
+			-e "s|/etc/i2pd|${PREFIX}/etc/i2pd|g" \
+			-e "s|/var/lib/i2pd|${PREFIX}/var/lib/i2pd|g" \
+			-e "s|/var/log/i2pd|${PREFIX}/var/log/i2pd|g" \
+			contrib/i2pd.service > /etc/systemd/system/i2pd.service; \
+		systemctl daemon-reload; \
+		systemctl enable i2pd.service; \
+	else \
+		echo "systemctl not found; skipping systemd unit installation."; \
+	fi
